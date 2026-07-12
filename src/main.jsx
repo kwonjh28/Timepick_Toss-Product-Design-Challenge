@@ -71,7 +71,7 @@ const PALETTE = {
 
 const STEP_COPY = {
   1: '타임테이블에 참석이 어려운 시간을 클릭하거나 드래그하여 지정해주세요.',
-  2: '선호도에 맞게 타임테이블을 지정해주세요.',
+  2: '선호도에 맞게 시간대를 지정해주세요.',
   3: '필수 참석자 모두가 가능하면서도, 선호도가 높은 시간대에요.'
 };
 
@@ -90,18 +90,40 @@ const TEAM_AVAILABLE_RANGES = {
 };
 
 const RESULT_AVAILABLE_RANGES = {
-  0: [[2, 4]],
-  1: [[4, 7]],
-  2: [[10, 11]],
-  3: [[5, 6]]
+  0: [[12, 13]],
+  1: [[15, 16]],
+  3: [[7, 8]]
 };
 
 const RESULT_PROTOTYPE_WINDOWS = [
-  { dayIndex: 0, start: 3 },
-  { dayIndex: 1, start: 5 },
-  { dayIndex: 3, start: 5 }
+  { dayIndex: 0, start: 12 },
+  { dayIndex: 1, start: 15 },
+  { dayIndex: 3, start: 7 }
 ];
 const ADJUSTMENT_PERSON_IDS = ['t1', 't2', 't3'];
+const CALENDAR_SYNC_EVENTS = [
+  { id: 'calendar-tds-review', dayIndex: 0, start: 2, end: 3, title: 'TDS 컴포넌트 리뷰' },
+  { id: 'calendar-policy-sync', dayIndex: 1, start: 5, end: 6, title: '제품 정책 싱크' },
+  { id: 'calendar-interview', dayIndex: 2, start: 8, end: 10, title: '사용자 인터뷰 참관' },
+  { id: 'calendar-critique', dayIndex: 3, start: 3, end: 4, title: '디자인 크리틱' },
+  { id: 'calendar-prototype-qa', dayIndex: 4, start: 11, end: 12, title: '프로토타입 QA' }
+];
+
+const buildCalendarSyncBlocks = (requiredAttendance) => {
+  const blocks = {};
+  CALENDAR_SYNC_EVENTS.forEach((event) => {
+    for (let timeIndex = event.start; timeIndex <= event.end; timeIndex += 1) {
+      blocks[cellKey(event.dayIndex, timeIndex)] = {
+        brush: 'unavailable',
+        required: requiredAttendance,
+        source: 'calendar',
+        eventId: event.id,
+        title: event.title
+      };
+    }
+  });
+  return blocks;
+};
 
 const isKeyInRanges = (key, ranges) => {
   const [dayIndex, timeIndex] = key.split('-').map(Number);
@@ -126,6 +148,9 @@ const formatSlotTime = (timeIndex) => {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 };
 const formatRange = (startIndex, endIndex) => `${formatSlotTime(startIndex)}-${formatSlotTime(endIndex + 1)}`;
+const formatResultLabel = (dayIndex, startIndex, endIndex) => (
+  `2026년 7월 ${13 + dayIndex}일(${DAYS[dayIndex]}) ${formatRange(startIndex, endIndex)}`
+);
 const TIME_MARKERS = Array.from({ length: 10 }, (_, index) => `${String(index + 9).padStart(2, '0')}:00`);
 const normalizeStepTwoBrush = (brush) => (brush === 'prefer' ? 'prefer' : 'available');
 const hasAdjacentOpenSlot = (key, blockedSlots) => {
@@ -221,15 +246,18 @@ function App() {
   const [adjustmentRequestedResultId, setAdjustmentRequestedResultId] = useState(null);
   const [completedAdjustmentIds, setCompletedAdjustmentIds] = useState(new Set());
   const [completedAdjustmentPersonIds, setCompletedAdjustmentPersonIds] = useState(new Set());
+  const [calendarSyncEnabled, setCalendarSyncEnabled] = useState(true);
+  const [showCalendarDisconnectConfirm, setShowCalendarDisconnectConfirm] = useState(false);
   const boardRef = useRef(null);
   const dragActionRef = useRef('paint');
+  const dragBrushRef = useRef('unavailable');
   const hasFixedBlocks = Object.keys(fixedBlocks).length > 0;
   const isAdjustmentScenario = scenario === 'adjustment';
 
   const requiredBlocked = useMemo(() => {
     return new Set(
       Object.entries(fixedBlocks)
-        .filter(([, value]) => value.required)
+        .filter(([, value]) => value.required && value.brush !== 'available')
         .map(([key]) => key)
     );
   }, [fixedBlocks]);
@@ -306,7 +334,9 @@ function App() {
       }
       const defaults = {};
       allKeys().forEach((key) => {
-        if (!meetingDisabledSlots.has(key)) defaults[key] = 'available';
+        if (isAdjustmentScenario ? isPrototypeResultKey(key) : !meetingDisabledSlots.has(key)) {
+          defaults[key] = 'available';
+        }
       });
       setPreferences(defaults);
       setSelectedBrush('prefer');
@@ -322,16 +352,32 @@ function App() {
   const getDragAction = (key) => {
     if (step === 1) {
       const currentBlock = fixedBlocks[key];
+      if (currentBlock?.source === 'calendar') return 'paint';
       return currentBlock?.brush === selectedBrush ? 'clear' : 'paint';
     }
     const currentBrush = normalizeStepTwoBrush(preferences[key]);
     return currentBrush === selectedBrush && selectedBrush !== 'available' ? 'clear' : 'paint';
   };
 
-  const paintCell = (key, action = dragActionRef.current) => {
+  const paintCell = (key, action = dragActionRef.current, brush = dragBrushRef.current) => {
     if (waiting || step === 3) return;
     if (step === 1) {
       setFixedBlocks((current) => {
+        const currentBlock = current[key];
+        if (currentBlock?.source === 'calendar') {
+          const next = { ...current };
+          const nextBrush = brush === 'flexible' ? 'flexible' : 'unavailable';
+          Object.entries(current).forEach(([blockKey, blockValue]) => {
+            if (blockValue.source === 'calendar' && blockValue.eventId === currentBlock.eventId) {
+              next[blockKey] = {
+                ...blockValue,
+                brush: nextBrush,
+                required: requiredAttendance
+              };
+            }
+          });
+          return next;
+        }
         if (action === 'clear') {
           const next = { ...current };
           delete next[key];
@@ -354,7 +400,8 @@ function App() {
     setIsDragging(true);
     const action = getDragAction(key);
     dragActionRef.current = action;
-    paintCell(key, action);
+    dragBrushRef.current = selectedBrush || 'unavailable';
+    paintCell(key, action, dragBrushRef.current);
   };
 
   const handleCellMouseDown = (key) => {
@@ -367,7 +414,7 @@ function App() {
   };
 
   const handleMouseEnter = (key) => {
-    if (isDragging) paintCell(key);
+    if (isDragging) paintCell(key, dragActionRef.current, dragBrushRef.current);
   };
 
   const handleComplete = () => {
@@ -395,6 +442,31 @@ function App() {
     setSubmittedPeople(new Set(step === 1 ? INITIAL_SUBMITTED_IDS : STEP_TWO_SUBMITTED_IDS));
   };
 
+  const applyCalendarSync = () => {
+    setCalendarSyncEnabled(true);
+    setFixedBlocks((current) => {
+      return { ...current, ...buildCalendarSyncBlocks(requiredAttendance) };
+    });
+  };
+
+  const resetCalendarSync = () => {
+    setCalendarSyncEnabled(false);
+    setShowCalendarDisconnectConfirm(false);
+    setFixedBlocks({});
+    setPreferences({});
+    setSelectedBrush('unavailable');
+    setSubmittedPeople(new Set(INITIAL_SUBMITTED_IDS));
+  };
+
+  const handleCalendarSyncToggle = () => {
+    if (waiting || step !== 1) return;
+    if (calendarSyncEnabled) {
+      setShowCalendarDisconnectConfirm(true);
+      return;
+    }
+    applyCalendarSync();
+  };
+
   const handleReturnHome = () => {
     setScenario(null);
     setHasEnteredScheduler(false);
@@ -415,6 +487,8 @@ function App() {
     setAdjustmentRequestedResultId(null);
     setCompletedAdjustmentIds(new Set());
     setCompletedAdjustmentPersonIds(new Set());
+    setCalendarSyncEnabled(true);
+    setShowCalendarDisconnectConfirm(false);
   };
 
   const getMyBrushForResult = (key) => {
@@ -467,7 +541,7 @@ function App() {
         keys: [firstKey, secondKey],
         score: resultRows[firstKey].total + resultRows[secondKey].total,
         attendeeCount: PEOPLE.length,
-        label: `2026년 7월 ${13 + dayIndex}일 ${formatRange(start, start + 1)}`
+        label: formatResultLabel(dayIndex, start, start + 1)
       };
     });
   }, [resultRows]);
@@ -493,7 +567,7 @@ function App() {
     const timer = setTimeout(() => {
       setCompletedAdjustmentIds((current) => new Set([...current, adjustmentRequestedResultId]));
       setCompletedAdjustmentPersonIds((current) => new Set([...current, adjustmentRequestedPersonId]));
-    }, 3000);
+    }, 2000);
     return () => clearTimeout(timer);
   }, [adjustmentRequestedPersonId, adjustmentRequestedResultId, completedAdjustmentIds, shareDialog]);
 
@@ -560,6 +634,12 @@ function App() {
         } else {
           adjustedBrush = entry.person.id === 'me' || isPersonRequired(entry.person) ? 'prefer' : 'available';
         }
+      } else if (targetWindow) {
+        if (unavailableIds.includes(entry.person.id) && !isPersonRequired(entry.person)) {
+          adjustedBrush = 'unavailable';
+        } else {
+          adjustedBrush = entry.person.id === 'me' || isPersonRequired(entry.person) ? 'prefer' : 'available';
+        }
       } else {
         if (unavailableIds.includes(entry.person.id) && !isPersonRequired(entry.person)) {
           adjustedBrush = 'unavailable';
@@ -589,6 +669,12 @@ function App() {
     return unavailableIds.includes(person.id);
   };
 
+  useEffect(() => {
+    if (!hasEnteredScheduler || step !== 1 || !calendarSyncEnabled) return;
+    const hasCalendarBlocks = Object.values(fixedBlocks).some((block) => block.source === 'calendar');
+    if (!hasCalendarBlocks) applyCalendarSync();
+  }, [hasEnteredScheduler, step, calendarSyncEnabled, fixedBlocks, requiredAttendance]);
+
   const getShareParticipants = (window) => {
     if (!window) return [];
     const unavailableIds = optionalUnavailableByResultId[window.id] || [];
@@ -597,11 +683,17 @@ function App() {
     });
   };
 
+  const isStepTwoDisabled = (key) => {
+    if (step !== 2) return false;
+    return isAdjustmentScenario ? !isPrototypeResultKey(key) : meetingDisabledSlots.has(key);
+  };
+
   const rangeLabels = useMemo(() => {
     const labels = [];
     DAYS.forEach((_, dayIndex) => {
       let start = null;
       let currentBrush = null;
+      let currentTitle = null;
       const flush = (endIndex) => {
         if (start === null || currentBrush === null) return;
         if (step === 3 && endIndex - start + 1 < 2) {
@@ -615,27 +707,32 @@ function App() {
           start,
           end: endIndex,
           text: formatRange(start, endIndex),
-          brush: currentBrush
+          brush: currentBrush,
+          title: currentTitle
         });
         start = null;
         currentBrush = null;
+        currentTitle = null;
       };
       TIMES.forEach((_, timeIndex) => {
         const key = cellKey(dayIndex, timeIndex);
+        const block = fixedBlocks[key];
         const brush = (() => {
           if (step === 1) return fixedBlocks[key]?.brush || null;
           if (step === 3) {
             if (isResultDisabled(key)) return null;
             return topOneHourResultKeys.has(key) ? 'result-top' : 'result';
           }
-          if (meetingDisabledSlots.has(key)) return null;
+          if (isStepTwoDisabled(key)) return null;
           return normalizeStepTwoBrush(preferences[key]);
         })();
-        if (brush && brush === currentBrush) return;
+        const title = step === 1 ? block?.title || null : null;
+        if (brush && brush === currentBrush && title === currentTitle) return;
         flush(timeIndex - 1);
         if (brush) {
           start = timeIndex;
           currentBrush = brush;
+          currentTitle = title;
         }
       });
       flush(TIMES.length - 1);
@@ -651,7 +748,7 @@ function App() {
         : {};
     }
     if (step === 2) {
-      if (meetingDisabledSlots.has(key)) return { background: '#d7dce6' };
+      if (isStepTwoDisabled(key)) return { background: '#d7dce6' };
       const brush = normalizeStepTwoBrush(preferences[key]);
       return { background: PALETTE[brush].cell, borderColor: '#e6edf5' };
     }
@@ -710,9 +807,9 @@ function App() {
           <div className="intro-content">
             <div className="intro-heading">
               <h1>
-                Tate (Product Designer)님이 초대한 타임픽
+                Tate (Product Designer)님이 초대한
                 <br />
-                에 초대되셨습니다.
+                타임픽에 초대되셨습니다.
               </h1>
               <p>7월 셋째주 회의</p>
               <span>7.13(월) - 7.17(금)</span>
@@ -796,6 +893,19 @@ function App() {
 
         <div className="workspace">
           <section className="board-wrap">
+            <div className="calendar-toolbar">
+              <label className={`calendar-sync-toggle ${calendarSyncEnabled ? 'checked' : ''} ${step !== 1 ? 'disabled' : ''}`}>
+                <span>캘린더 연동</span>
+                <input
+                  type="checkbox"
+                  checked={calendarSyncEnabled}
+                  disabled={waiting || step !== 1}
+                  onChange={handleCalendarSyncToggle}
+                  aria-label="캘린더 연동"
+                />
+                <i aria-hidden="true" />
+              </label>
+            </div>
             <div ref={boardRef} className={`board ${waiting ? 'is-waiting' : ''}`}>
               <div className="grid header-grid">
                 <div className="corner" />
@@ -815,8 +925,9 @@ function App() {
                     {DAYS.map((day, dayIndex) => {
                       const key = cellKey(dayIndex, timeIndex);
                       const disabled =
-                        (step === 2 && meetingDisabledSlots.has(key)) ||
+                        isStepTwoDisabled(key) ||
                         (step === 3 && isResultDisabled(key));
+                      const isCalendarLinked = step === 1 && fixedBlocks[key]?.source === 'calendar';
                       const cellStateLabel = (() => {
                         if (step === 1) {
                           const block = fixedBlocks[key];
@@ -834,17 +945,17 @@ function App() {
                         <button
                           key={key}
                           type="button"
-                          className={`slot ${timeIndex % 2 === 1 ? 'hour-end' : ''} ${disabled ? 'disabled' : ''} ${step === 3 ? 'result' : ''}`}
+                          className={`slot ${timeIndex % 2 === 1 ? 'hour-end' : ''} ${disabled ? 'disabled' : ''} ${step === 3 ? 'result' : ''} ${isCalendarLinked ? 'calendar-linked' : ''}`}
                           style={renderCellStyle(key)}
                           onMouseDown={() => handleCellMouseDown(key)}
                           onMouseEnter={(event) => {
                             handleMouseEnter(key);
                             if (step === 3 && !disabled) {
-                              setTooltip({ key, x: event.clientX + 16, y: event.clientY + 16 });
+                              setTooltip({ key, x: event.clientX + 76, y: event.clientY + 32 });
                             }
                           }}
                           onMouseMove={(event) => {
-                            if (step === 3 && !disabled) setTooltip({ key, x: event.clientX + 16, y: event.clientY + 16 });
+                            if (step === 3 && !disabled) setTooltip({ key, x: event.clientX + 76, y: event.clientY + 32 });
                           }}
                           onMouseLeave={() => step === 3 && setTooltip(null)}
                           disabled={waiting || disabled}
@@ -870,7 +981,7 @@ function App() {
                     return (
                       <span
                         key={label.id}
-                        className={`selection-label ${isAdjustmentScenario && label.brush.startsWith('result') ? 'adjustment' : ''} ${completedAdjustmentLabel ? 'adjustment-completed' : ''}`}
+                        className={`selection-label ${label.title ? 'calendar-event' : ''} ${isAdjustmentScenario && label.brush.startsWith('result') ? 'adjustment' : ''} ${completedAdjustmentLabel ? 'adjustment-completed' : ''}`}
                         style={{
                           left: `${60 + label.dayIndex * 200}px`,
                           top: `${CALENDAR_HEADER_HEIGHT + label.start * CALENDAR_ROW_HEIGHT}px`,
@@ -881,7 +992,12 @@ function App() {
                             : PALETTE[label.brush].text
                         }}
                       >
-                        {isAdjustmentScenario && label.brush.startsWith('result') ? (
+                        {label.title ? (
+                          <>
+                            <span className="calendar-event-title">{label.title}</span>
+                            <span className="calendar-event-time">{label.text}</span>
+                          </>
+                        ) : isAdjustmentScenario && label.brush.startsWith('result') ? (
                           <>
                             <span className="adjustment-note">
                               {completedAdjustmentLabel ? (
@@ -1098,8 +1214,8 @@ function App() {
             ) : shareDialog === 'sent' ? (
               <>
                 <div className="share-modal-heading sent">
-                  <h2 id="share-dialog-title">알림 전송이 완료됐습니다.</h2>
-                  <p>참석자들에게 선택하신 일정이 공유됐어요.</p>
+                  <h2 id="share-dialog-title">일정이 공유됐습니다.</h2>
+                  <p>참석자들에게 선택하신 일정을 전달했어요.</p>
                 </div>
                 <button className="modal-cta" type="button" onClick={handleReturnHome}>
                   메인화면으로 되돌아가기
@@ -1142,6 +1258,25 @@ function App() {
                 </button>
               </>
             )}
+          </section>
+        </div>
+      )}
+
+      {showCalendarDisconnectConfirm && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="calendar-disconnect-title">
+          <section className="share-modal confirm-modal">
+            <div className="share-modal-heading">
+              <h2 id="calendar-disconnect-title">캘린더 연동을 해제하시겠습니까?</h2>
+              <p>지금까지 설정한 값들이 초기화돼요.</p>
+            </div>
+            <div className="confirm-actions">
+              <button type="button" className="confirm-button secondary" onClick={() => setShowCalendarDisconnectConfirm(false)}>
+                아니오
+              </button>
+              <button type="button" className="confirm-button primary" onClick={resetCalendarSync}>
+                네
+              </button>
+            </div>
           </section>
         </div>
       )}
