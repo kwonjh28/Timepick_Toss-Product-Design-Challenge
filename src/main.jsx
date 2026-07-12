@@ -775,7 +775,7 @@ function App() {
         <section className="intro-card scenario-card" aria-label="프로토타입 시나리오 선택">
           <div className="scenario-content">
             <div className="intro-heading">
-              <h1>열람해주셔서 감사합니다.</h1>
+              <h1>열람해주셔서 감사합니다. 지원자 권정호입니다.</h1>
               <p>두 가지 시나리오를 준비해보았습니다.</p>
             </div>
 
