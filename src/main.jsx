@@ -37,7 +37,7 @@ const PALETTE = {
   },
   flexible: {
     id: 'flexible',
-    label: '불가하나, 조정 여지 있음',
+    label: '불가하나 조정 여지 있음',
     short: '조정',
     score: 2,
     color: '#f97316',
@@ -68,9 +68,9 @@ const PALETTE = {
 };
 
 const STEP_COPY = {
-  1: '참여가 어려운 일정을 클릭하거나 드래그하여 지정해주세요.',
-  2: '선호도에 맞게 일정을 지정해주세요.',
-  3: '필수 참가자 모두가 가능하면서도 선호도가 높은 시간대를 골라드렸어요.'
+  1: '타임테이블에 참석이 어려운 시간을 클릭하거나 드래그하여 지정해주세요.',
+  2: '선호도에 맞게 타임테이블을 지정해주세요.',
+  3: '필수 참석자 모두가 가능하면서도, 선호도가 높은 시간대에요.'
 };
 
 const STEP_LABELS = ['불가 일정 선택', '가능 일정 선택', '결과 확인'];
@@ -94,6 +94,13 @@ const RESULT_AVAILABLE_RANGES = {
   3: [[5, 6]]
 };
 
+const RESULT_PROTOTYPE_WINDOWS = [
+  { dayIndex: 0, start: 3 },
+  { dayIndex: 1, start: 5 },
+  { dayIndex: 3, start: 5 }
+];
+const ADJUSTMENT_PERSON_IDS = ['t1', 't2', 't3'];
+
 const isKeyInRanges = (key, ranges) => {
   const [dayIndex, timeIndex] = key.split('-').map(Number);
   return ranges[dayIndex]?.some(([start, end]) => timeIndex >= start && timeIndex <= end);
@@ -101,6 +108,12 @@ const isKeyInRanges = (key, ranges) => {
 
 const isTeamAvailableCandidate = (key) => isKeyInRanges(key, TEAM_AVAILABLE_RANGES);
 const isResultCandidate = (key) => isKeyInRanges(key, RESULT_AVAILABLE_RANGES);
+const isPrototypeResultKey = (key) => {
+  const [dayIndex, timeIndex] = key.split('-').map(Number);
+  return RESULT_PROTOTYPE_WINDOWS.some((window) => (
+    window.dayIndex === dayIndex && (window.start === timeIndex || window.start + 1 === timeIndex)
+  ));
+};
 
 const cellKey = (day, time) => `${day}-${time}`;
 const allKeys = () => DAYS.flatMap((_, day) => TIMES.map((__, time) => cellKey(day, time)));
@@ -185,6 +198,7 @@ function buildTeammateData(blockedKeys, teamFixedBlocks) {
 }
 
 function App() {
+  const [scenario, setScenario] = useState(null);
   const [hasEnteredScheduler, setHasEnteredScheduler] = useState(false);
   const [participantName, setParticipantName] = useState('Tate (Product Designer)');
   const [step, setStep] = useState(1);
@@ -200,9 +214,15 @@ function App() {
   const [writingDotCount, setWritingDotCount] = useState(1);
   const [timerSeconds, setTimerSeconds] = useState(8263);
   const [selectedResultId, setSelectedResultId] = useState(null);
+  const [shareDialog, setShareDialog] = useState(null);
+  const [adjustmentRequestedPersonId, setAdjustmentRequestedPersonId] = useState(null);
+  const [adjustmentRequestedResultId, setAdjustmentRequestedResultId] = useState(null);
+  const [completedAdjustmentIds, setCompletedAdjustmentIds] = useState(new Set());
+  const [completedAdjustmentPersonIds, setCompletedAdjustmentPersonIds] = useState(new Set());
   const boardRef = useRef(null);
   const dragActionRef = useRef('paint');
   const hasFixedBlocks = Object.keys(fixedBlocks).length > 0;
+  const isAdjustmentScenario = scenario === 'adjustment';
 
   const requiredBlocked = useMemo(() => {
     return new Set(
@@ -298,7 +318,10 @@ function App() {
   }, [waiting, waitingTargetStep, meetingDisabledSlots, fixedBlocks]);
 
   const getDragAction = (key) => {
-    if (step === 1) return fixedBlocks[key] ? 'clear' : 'paint';
+    if (step === 1) {
+      const currentBlock = fixedBlocks[key];
+      return currentBlock?.brush === selectedBrush ? 'clear' : 'paint';
+    }
     const currentBrush = normalizeStepTwoBrush(preferences[key]);
     return currentBrush === selectedBrush && selectedBrush !== 'available' ? 'clear' : 'paint';
   };
@@ -346,7 +369,10 @@ function App() {
   };
 
   const handleComplete = () => {
-    if (step === 3) return;
+    if (step === 3) {
+      if (selectedResultWindow) setShareDialog(canShareSelectedResult ? 'share' : 'adjust');
+      return;
+    }
     if (step === 1 && !hasFixedBlocks) return;
     if (step === 1) {
       setSubmittedPeople(new Set(['me', ...INITIAL_SUBMITTED_IDS]));
@@ -365,6 +391,28 @@ function App() {
     setWaitingTargetStep(null);
     setSelectedResultId(null);
     setSubmittedPeople(new Set(step === 1 ? INITIAL_SUBMITTED_IDS : STEP_TWO_SUBMITTED_IDS));
+  };
+
+  const handleReturnHome = () => {
+    setScenario(null);
+    setHasEnteredScheduler(false);
+    setStep(1);
+    setRequiredAttendance(true);
+    setSelectedBrush('unavailable');
+    setFixedBlocks({});
+    setPreferences({});
+    setIsDragging(false);
+    setWaiting(false);
+    setWaitingTargetStep(null);
+    setSubmittedPeople(new Set(INITIAL_SUBMITTED_IDS));
+    setTooltip(null);
+    setTimerSeconds(8263);
+    setSelectedResultId(null);
+    setShareDialog(null);
+    setAdjustmentRequestedPersonId(null);
+    setAdjustmentRequestedResultId(null);
+    setCompletedAdjustmentIds(new Set());
+    setCompletedAdjustmentPersonIds(new Set());
   };
 
   const getMyBrushForResult = (key) => {
@@ -395,11 +443,7 @@ function App() {
   }, [preferences, requiredBlocked, requiredAttendance, teamData]);
 
   const hasResultBlockingIssue = (key) => {
-    return (
-      !isResultCandidate(key) ||
-      meetingDisabledSlots.has(key) ||
-      resultRows[key].entries.some((entry) => entry.brush === 'unavailable' || entry.brush === 'flexible')
-    );
+    return !isPrototypeResultKey(key);
   };
 
   const isResultDisabled = (key) => {
@@ -410,42 +454,21 @@ function App() {
   };
 
   const topOneHourResultWindows = useMemo(() => {
-    const windows = [];
-    DAYS.forEach((_, dayIndex) => {
-      for (let timeIndex = 0; timeIndex < TIMES.length - 1; timeIndex += 1) {
-        const firstKey = cellKey(dayIndex, timeIndex);
-        const secondKey = cellKey(dayIndex, timeIndex + 1);
-        if (isResultDisabled(firstKey) || isResultDisabled(secondKey)) continue;
-        windows.push({
-          id: `${dayIndex}-${timeIndex}`,
-          dayIndex,
-          start: timeIndex,
-          end: timeIndex + 1,
-          keys: [firstKey, secondKey],
-          score: resultRows[firstKey].total + resultRows[secondKey].total,
-          attendeeCount: PEOPLE.filter((person) => {
-            return [firstKey, secondKey].every((key) => {
-              const entry = resultRows[key].entries.find((item) => item.person.id === person.id);
-              return entry?.attendable;
-            });
-          }).length,
-          label: `2026년 7월 ${13 + dayIndex}일 ${formatRange(timeIndex, timeIndex + 1)}`
-        });
-      }
+    return RESULT_PROTOTYPE_WINDOWS.map(({ dayIndex, start }) => {
+      const firstKey = cellKey(dayIndex, start);
+      const secondKey = cellKey(dayIndex, start + 1);
+      return {
+        id: `${dayIndex}-${start}`,
+        dayIndex,
+        start,
+        end: start + 1,
+        keys: [firstKey, secondKey],
+        score: resultRows[firstKey].total + resultRows[secondKey].total,
+        attendeeCount: PEOPLE.length,
+        label: `2026년 7월 ${13 + dayIndex}일 ${formatRange(start, start + 1)}`
+      };
     });
-
-    const usedKeys = new Set();
-    const selectedWindows = [];
-    windows
-      .sort((a, b) => b.score - a.score)
-      .forEach((window) => {
-        if (selectedWindows.length >= 3) return;
-        if (window.keys.some((key) => usedKeys.has(key))) return;
-        selectedWindows.push(window);
-        window.keys.forEach((key) => usedKeys.add(key));
-      });
-    return selectedWindows;
-  }, [resultRows, meetingDisabledSlots]);
+  }, [resultRows]);
 
   const topOneHourResultKeys = useMemo(() => {
     return new Set(topOneHourResultWindows.flatMap((window) => window.keys));
@@ -454,6 +477,23 @@ function App() {
   const selectedResultWindow = useMemo(() => {
     return topOneHourResultWindows.find((window) => window.id === selectedResultId) || null;
   }, [topOneHourResultWindows, selectedResultId]);
+
+  useEffect(() => {
+    if (step === 3 && !selectedResultId && topOneHourResultWindows.length > 0) {
+      setSelectedResultId(topOneHourResultWindows[0].id);
+    }
+  }, [step, selectedResultId, topOneHourResultWindows]);
+
+  useEffect(() => {
+    if (!adjustmentRequestedPersonId || !adjustmentRequestedResultId || completedAdjustmentIds.has(adjustmentRequestedResultId) || shareDialog) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setCompletedAdjustmentIds((current) => new Set([...current, adjustmentRequestedResultId]));
+      setCompletedAdjustmentPersonIds((current) => new Set([...current, adjustmentRequestedPersonId]));
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [adjustmentRequestedPersonId, adjustmentRequestedResultId, completedAdjustmentIds, shareDialog]);
 
   const optionalUnavailableByResultId = useMemo(() => {
     const patterns = [[], ['t4'], ['t4', 't5']];
@@ -472,14 +512,87 @@ function App() {
   };
 
   const getDisplayedAttendanceLabel = (window) => {
+    if (isAdjustmentScenario) {
+      if (isCompletedAdjustmentWindow(window.id)) {
+        return `${getAdjustmentPersonName(window)}님 조정 완료`;
+      }
+      const attendeeCount = getDisplayedAttendeeCount(window);
+      const attendanceText = attendeeCount === PEOPLE.length ? '전원참석' : `${attendeeCount}명 참석`;
+      return `${getAdjustmentPersonName(window)}님 조정 시 ${attendanceText}`;
+    }
     const unavailableCount = PEOPLE.length - getDisplayedAttendeeCount(window);
     return unavailableCount === 0 ? '전원참석' : `${unavailableCount}명 참여불가`;
+  };
+
+  const getAdjustmentPersonName = (target) => {
+    const windowId = `${target.dayIndex}-${target.start}`;
+    const personId = getAdjustmentPersonId(windowId);
+    const person = PEOPLE.find((item) => item.id === personId);
+    return person?.name || '참여자';
+  };
+
+  const getAdjustmentPersonId = (windowId) => {
+    const windowIndex = topOneHourResultWindows.findIndex((window) => window.id === windowId);
+    return ADJUSTMENT_PERSON_IDS[Math.max(0, windowIndex) % ADJUSTMENT_PERSON_IDS.length];
+  };
+
+  const isRequestedAdjustmentWindow = (windowId) => isAdjustmentScenario && adjustmentRequestedResultId === windowId;
+  const isCompletedAdjustmentWindow = (windowId) => isAdjustmentScenario && completedAdjustmentIds.has(windowId);
+  const canShareSelectedResult = !isAdjustmentScenario || (
+    selectedResultWindow && isCompletedAdjustmentWindow(selectedResultWindow.id)
+  );
+
+  const getTooltipGroups = (key) => {
+    const targetWindow = topOneHourResultWindows.find((window) => window.keys.includes(key));
+    const adjustmentPersonId = isAdjustmentScenario && targetWindow ? getAdjustmentPersonId(targetWindow.id) : null;
+    const unavailableIds = targetWindow ? optionalUnavailableByResultId[targetWindow.id] || [] : [];
+    const rowsByBrush = BRUSH_ORDER.reduce((map, brush) => ({ ...map, [brush]: [] }), {});
+
+    resultRows[key].entries.forEach((entry) => {
+      let adjustedBrush = entry.brush;
+      if (isAdjustmentScenario && targetWindow) {
+        if (unavailableIds.includes(entry.person.id) && !isPersonRequired(entry.person)) {
+          adjustedBrush = 'unavailable';
+        } else if (entry.person.id === adjustmentPersonId) {
+          adjustedBrush = 'flexible';
+        } else {
+          adjustedBrush = entry.person.id === 'me' || isPersonRequired(entry.person) ? 'prefer' : 'available';
+        }
+      } else {
+        if (unavailableIds.includes(entry.person.id) && !isPersonRequired(entry.person)) {
+          adjustedBrush = 'unavailable';
+        }
+      }
+
+      const displayName = entry.person.id === 'me'
+        ? participantName.trim() || entry.person.name
+        : entry.person.name;
+      rowsByBrush[adjustedBrush].push({
+        id: entry.person.id,
+        name: displayName,
+        required: isPersonRequired(entry.person)
+      });
+    });
+
+    return ['flexible', 'available', 'prefer', 'unavailable'].map((brush) => ({
+      brush,
+      people: rowsByBrush[brush].sort((a, b) => Number(b.required) - Number(a.required)),
+      count: rowsByBrush[brush].length
+    }));
   };
 
   const isUnavailableOptionalForSelectedResult = (person) => {
     if (step !== 3 || !selectedResultWindow || isPersonRequired(person)) return false;
     const unavailableIds = optionalUnavailableByResultId[selectedResultWindow.id] || [];
     return unavailableIds.includes(person.id);
+  };
+
+  const getShareParticipants = (window) => {
+    if (!window) return [];
+    const unavailableIds = optionalUnavailableByResultId[window.id] || [];
+    return PEOPLE.filter((person) => {
+      return isPersonRequired(person) || !unavailableIds.includes(person.id);
+    });
   };
 
   const rangeLabels = useMemo(() => {
@@ -542,8 +655,12 @@ function App() {
     }
     if (isResultDisabled(key)) return { background: '#d7dce6' };
     const alpha = topOneHourResultKeys.has(key) ? 0.55 : 0.2;
+    const completedAdjustmentWindow = topOneHourResultWindows.find((window) => (
+      isCompletedAdjustmentWindow(window.id) && window.keys.includes(key)
+    ));
+    const resultColor = !isAdjustmentScenario || completedAdjustmentWindow ? '49, 130, 246' : '249, 115, 22';
     return {
-      background: `rgba(49, 130, 246, ${alpha})`,
+      background: `rgba(${resultColor}, ${alpha})`,
       borderColor: '#e6edf5',
       color: '#172033'
     };
@@ -553,14 +670,49 @@ function App() {
     ? ['unavailable', 'flexible']
     : ['unavailable', 'flexible', 'available', 'prefer'];
 
+  if (!scenario) {
+    return (
+      <main className="app-shell intro-shell">
+        <section className="intro-card scenario-card" aria-label="프로토타입 시나리오 선택">
+          <div className="scenario-content">
+            <div className="intro-heading">
+              <h1>열람해주셔서 감사합니다.</h1>
+              <p>두 가지 시나리오를 준비해보았습니다.</p>
+            </div>
+
+            <div className="scenario-options">
+              <article className="scenario-option">
+                <h2>6명 모두 가능한 시간이 존재할 때</h2>
+                <button type="button" onClick={() => setScenario('matched')}>
+                  프로토타입 보러가기
+                </button>
+              </article>
+
+              <article className="scenario-option">
+                <h2>6명 모두 가능한 시간이 부재할 때</h2>
+                <button type="button" onClick={() => setScenario('adjustment')}>
+                  프로토타입 보러가기
+                </button>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   if (!hasEnteredScheduler) {
     return (
       <main className="app-shell intro-shell">
         <section className="intro-card" aria-label="타임픽 초대">
           <div className="intro-content">
             <div className="intro-heading">
-              <h1>김정현님이 초대한 타임픽에 초대되셨습니다.</h1>
-              <p>7월 셋째주 회의시간 정하기</p>
+              <h1>
+                Tate (Product Designer)님이 초대한 타임픽
+                <br />
+                에 초대되셨습니다.
+              </h1>
+              <p>7월 셋째주 회의</p>
               <span>7.13(월) - 7.17(금)</span>
             </div>
 
@@ -620,7 +772,13 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">Step{step}</p>
-            <h1>{STEP_COPY[step]}</h1>
+            <h1>
+              {step === 3 && isAdjustmentScenario
+                ? completedAdjustmentIds.size > 0
+                  ? '조정이 완료되어 모두가 참석 가능한 시간이 생겼어요.'
+                  : '적합한 시간이 부재하여 최소 인원 조정 시 가능해지는 시간대를 추려보았어요.'
+                : STEP_COPY[step]}
+            </h1>
           </div>
           <div className={`stepper step-${step}`} aria-label="진행 단계">
             {[1, 2, 3].map((value, index) => (
@@ -704,21 +862,41 @@ function App() {
               </div>
               {rangeLabels.length > 0 && (
                 <div className="selection-label-layer" aria-hidden="true">
-                  {rangeLabels.map((label) => (
-                    <span
-                      key={label.id}
-                      className="selection-label"
-                      style={{
-                        left: `${60 + label.dayIndex * 200}px`,
-                        top: `${68 + label.start * 28}px`,
-                        width: '200px',
-                        height: `${(label.end - label.start + 1) * 28}px`,
-                        color: label.brush.startsWith('result') ? '#172033' : PALETTE[label.brush].text
-                      }}
-                    >
-                      {label.text}
-                    </span>
-                  ))}
+                  {rangeLabels.map((label) => {
+                    const labelWindowId = `${label.dayIndex}-${label.start}`;
+                    const completedAdjustmentLabel = isCompletedAdjustmentWindow(labelWindowId);
+                    return (
+                      <span
+                        key={label.id}
+                        className={`selection-label ${isAdjustmentScenario && label.brush.startsWith('result') ? 'adjustment' : ''} ${completedAdjustmentLabel ? 'adjustment-completed' : ''}`}
+                        style={{
+                          left: `${60 + label.dayIndex * 200}px`,
+                          top: `${68 + label.start * 28}px`,
+                          width: '200px',
+                          height: `${(label.end - label.start + 1) * 28}px`,
+                          color: label.brush.startsWith('result')
+                            ? isAdjustmentScenario && !completedAdjustmentLabel ? '#9a3412' : '#172033'
+                            : PALETTE[label.brush].text
+                        }}
+                      >
+                        {isAdjustmentScenario && label.brush.startsWith('result') ? (
+                          <>
+                            <span className="adjustment-note">
+                              {completedAdjustmentLabel ? (
+                                <span className="adjustment-complete-text">조정 완료✓</span>
+                              ) : (
+                                <>
+                                  <span className="adjustment-name">{getAdjustmentPersonName(label)}</span>
+                                  <span className="adjustment-suffix">님 조정 시 가능</span>
+                                </>
+                              )}
+                            </span>
+                            <span className="adjustment-time">{label.text}</span>
+                          </>
+                        ) : label.text}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
               {step === 3 && selectedResultWindow && (
@@ -738,7 +916,7 @@ function App() {
               {waiting && (
                 <div className="waiting-overlay">
                   <div className="spinner" />
-                  <p>모든 구성원이 작성을 완료하면 알려드릴게요.</p>
+                  <p>{step === 1 ? '모든 참석자가 작성을 완료하면 알림을 보내드릴게요.' : '모든 구성원이 작성을 완료하면 알림을 보내드릴게요.'}</p>
                   <button className="waiting-edit-button" type="button" onClick={handleEditWaiting}>
                     수정하기
                   </button>
@@ -761,7 +939,7 @@ function App() {
 
             <div className="palette-panel">
               <div className="palette-top">
-                <h2>{step === 3 ? '원하시는 시간을 골라, 참여자들에게 공유해주세요.' : '원하시는 팔레트를 선택해주세요.'}</h2>
+                <h2>{step === 3 ? '가장 많은 인원이 선호하는 시간대에요.' : '팔레트'}</h2>
               </div>
 
               {step === 3 ? (
@@ -775,7 +953,12 @@ function App() {
                       disabled={waiting}
                     >
                       <span>{window.label}</span>
-                      <small>{getDisplayedAttendanceLabel(window)}</small>
+                      <small>
+                        {getDisplayedAttendanceLabel(window)}
+                        {isRequestedAdjustmentWindow(window.id) && !isCompletedAdjustmentWindow(window.id) && (
+                          <i className="result-adjusting-tag">조정 중</i>
+                        )}
+                      </small>
                     </button>
                   ))}
                 </div>
@@ -809,7 +992,7 @@ function App() {
                 onClick={handleComplete}
                 disabled={waiting || (step === 1 && !hasFixedBlocks) || (step === 3 && !selectedResultWindow)}
               >
-                {step === 3 ? '공유하기' : '작성 완료'}
+                {step === 3 ? (canShareSelectedResult ? '공유하기' : '조정 요청하기') : '작성 완료'}
               </button>
             </div>
           </aside>
@@ -820,6 +1003,9 @@ function App() {
               const displayName = person.id === 'me' ? participantName.trim() || person.name : person.name;
               const personRequired = isPersonRequired(person);
               const dimmed = isUnavailableOptionalForSelectedResult(person);
+              const isAdjusting = step === 3 && adjustmentRequestedPersonId === person.id;
+              const isAdjustmentDone = step === 3 && completedAdjustmentPersonIds.has(person.id);
+              const isAdjustmentPending = isAdjusting && !isAdjustmentDone;
               return (
                 <div className={`profile ${dimmed ? 'dimmed' : ''}`} key={person.id}>
                   <strong>{displayName}</strong>
@@ -827,8 +1013,8 @@ function App() {
                     <span className={`role-badge ${personRequired ? 'required' : 'optional'}`}>
                       {personRequired ? '필수' : '선택'}
                     </span>
-                    <span className={done ? 'complete' : 'writing'}>
-                    {done ? '작성 완료✓' : `작성 중${'.'.repeat(writingDotCount)}`}
+                    <span className={isAdjustmentDone ? 'adjust-complete' : isAdjustmentPending ? 'adjusting' : done ? 'complete' : 'writing'}>
+                    {isAdjustmentDone ? '조정 완료' : isAdjustmentPending ? '조정 중..' : done ? '작성 완료✓' : `작성 중${'.'.repeat(writingDotCount)}`}
                     </span>
                   </div>
                 </div>
@@ -842,18 +1028,119 @@ function App() {
         <div className="tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
           <strong>{DAYS[Number(tooltip.key.split('-')[0])]} {TIMES[Number(tooltip.key.split('-')[1])]}</strong>
           <ul>
-            {BRUSH_ORDER.map((brush) => ({
-              brush,
-              count: resultRows[tooltip.key].entries.filter((entry) => entry.brush === brush).length
-            }))
+            {getTooltipGroups(tooltip.key)
               .filter(({ count }) => count > 0)
-              .map(({ brush, count }) => (
-              <li key={brush}>
+              .map(({ brush, people }) => (
+              <li key={brush} className={brush === 'unavailable' ? 'tooltip-unavailable-group' : ''}>
                 <span className="mini-swatch" style={{ background: PALETTE[brush].color }} />
-                <em>{count}명</em>
+                <span className="tooltip-members">
+                  <em>{PALETTE[brush].label}</em>
+                  <span>
+                    {people.map((person) => (
+                      <b key={person.id}>
+                        <span>{person.name}</span>
+                        {person.required && <i>필수</i>}
+                      </b>
+                    ))}
+                  </span>
+                </span>
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {shareDialog && selectedResultWindow && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="share-dialog-title">
+          <section className="share-modal">
+            {(shareDialog === 'share' || shareDialog === 'adjust') && (
+              <button
+                className="modal-close"
+                type="button"
+                aria-label="팝업 닫기"
+                onClick={() => setShareDialog(null)}
+              >
+                ×
+              </button>
+            )}
+            {shareDialog === 'share' ? (
+              <>
+                <div className="share-modal-heading">
+                  <h2 id="share-dialog-title">선택한 일정을 공유할까요?</h2>
+                  <p>확정된 일정 정보를 알림으로 전송합니다.</p>
+                </div>
+                <dl className="share-summary">
+                  <div>
+                    <dt>일정명</dt>
+                    <dd>7월 셋째주 회의</dd>
+                  </div>
+                  <div>
+                    <dt>일정</dt>
+                    <dd>{selectedResultWindow.label}</dd>
+                  </div>
+                  <div>
+                    <dt>참여자명</dt>
+                    <dd>
+                      {getShareParticipants(selectedResultWindow).map((person) => (
+                        <span key={person.id}>
+                          {person.id === 'me' ? participantName.trim() || person.name : person.name}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                </dl>
+                <button className="modal-cta" type="button" onClick={() => setShareDialog('sent')}>
+                  공유하기
+                </button>
+              </>
+            ) : shareDialog === 'sent' ? (
+              <>
+                <div className="share-modal-heading sent">
+                  <h2 id="share-dialog-title">알림 전송이 완료됐습니다.</h2>
+                  <p>참석자들에게 선택하신 일정이 공유됐어요.</p>
+                </div>
+                <button className="modal-cta" type="button" onClick={handleReturnHome}>
+                  메인화면으로 되돌아가기
+                </button>
+              </>
+            ) : shareDialog === 'adjust' ? (
+              <>
+                <div className="share-modal-heading">
+                  <h2 id="share-dialog-title">일정 조정을 요청하시겠습니까?</h2>
+                </div>
+                <dl className="share-summary">
+                  <div>
+                    <dt>조정 요청 대상자</dt>
+                    <dd>{getAdjustmentPersonName(selectedResultWindow)}</dd>
+                  </div>
+                  <div>
+                    <dt>조정 시간</dt>
+                    <dd>{selectedResultWindow.label}</dd>
+                  </div>
+                </dl>
+                <button
+                  className="modal-cta"
+                  type="button"
+                  onClick={() => {
+                    setAdjustmentRequestedPersonId(getAdjustmentPersonId(selectedResultWindow.id));
+                    setAdjustmentRequestedResultId(selectedResultWindow.id);
+                    setShareDialog('adjustSent');
+                  }}
+                >
+                  조정 요청하기
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="share-modal-heading sent">
+                  <h2 id="share-dialog-title">조정 요청이 완료되었습니다.</h2>
+                </div>
+                <button className="modal-cta" type="button" onClick={() => setShareDialog(null)}>
+                  대기화면으로 돌아가기
+                </button>
+              </>
+            )}
+          </section>
         </div>
       )}
     </main>
