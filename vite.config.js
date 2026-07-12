@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/Timepick_Toss-Product-Design-Challenge/',
+  base: './',
   build: {
     outDir: 'docs'
   }
