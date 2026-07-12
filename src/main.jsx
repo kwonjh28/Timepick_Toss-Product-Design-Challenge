@@ -4,6 +4,8 @@ import './styles.css';
 
 const DAYS = ['월', '화', '수', '목', '금'];
 const DAY_DATES = ['7/13', '7/14', '7/15', '7/16', '7/17'];
+const CALENDAR_HEADER_HEIGHT = 68;
+const CALENDAR_ROW_HEIGHT = 30;
 const TIMES = Array.from({ length: 18 }, (_, index) => {
   const startMinutes = 9 * 60 + index * 30;
   const endMinutes = startMinutes + 30;
@@ -855,7 +857,7 @@ function App() {
               </div>
               <div className="time-axis" aria-hidden="true">
                 {TIME_MARKERS.map((marker, index) => (
-                  <span key={marker} style={{ top: `${68 + index * 56}px` }}>
+                  <span key={marker} style={{ top: `${CALENDAR_HEADER_HEIGHT + index * CALENDAR_ROW_HEIGHT * 2}px` }}>
                     {marker}
                   </span>
                 ))}
@@ -871,9 +873,9 @@ function App() {
                         className={`selection-label ${isAdjustmentScenario && label.brush.startsWith('result') ? 'adjustment' : ''} ${completedAdjustmentLabel ? 'adjustment-completed' : ''}`}
                         style={{
                           left: `${60 + label.dayIndex * 200}px`,
-                          top: `${68 + label.start * 28}px`,
+                          top: `${CALENDAR_HEADER_HEIGHT + label.start * CALENDAR_ROW_HEIGHT}px`,
                           width: '200px',
-                          height: `${(label.end - label.start + 1) * 28}px`,
+                          height: `${(label.end - label.start + 1) * CALENDAR_ROW_HEIGHT}px`,
                           color: label.brush.startsWith('result')
                             ? isAdjustmentScenario && !completedAdjustmentLabel ? '#9a3412' : '#172033'
                             : PALETTE[label.brush].text
@@ -905,9 +907,9 @@ function App() {
                     className="result-selection-outline"
                     style={{
                       left: `${60 + selectedResultWindow.dayIndex * 200}px`,
-                      top: `${68 + selectedResultWindow.start * 28}px`,
+                      top: `${CALENDAR_HEADER_HEIGHT + selectedResultWindow.start * CALENDAR_ROW_HEIGHT}px`,
                       width: '200px',
-                      height: `${(selectedResultWindow.end - selectedResultWindow.start + 1) * 28}px`
+                      height: `${(selectedResultWindow.end - selectedResultWindow.start + 1) * CALENDAR_ROW_HEIGHT}px`
                     }}
                   />
                 </div>

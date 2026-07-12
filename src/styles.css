@@ -13,9 +13,16 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow: hidden;
+  background: #eef2f6;
+}
+
 body {
   margin: 0;
-  min-width: 1280px;
+  min-width: 1088px;
+  height: 100vh;
+  overflow: hidden;
 }
 
 button,
@@ -24,16 +31,22 @@ input {
 }
 
 .app-shell {
-  min-height: 100vh;
-  padding: 43px 0 75px;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 117.647%;
+  min-height: 117.647vh;
+  padding: 59px 0;
   background: #eef2f6;
+  transform: translate(-50%, -50%) scale(0.85);
+  transform-origin: center;
 }
 
 .intro-shell {
   display: grid;
-  min-height: 100vh;
-  padding: 74px 0 43px;
-  place-items: start center;
+  min-height: 117.647vh;
+  padding: 59px 0;
+  place-items: center;
 }
 
 .intro-card {
@@ -488,17 +501,17 @@ h1 {
 }
 
 .day-heading strong {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 900;
-  line-height: 23px;
+  line-height: 24px;
   margin: 0;
 }
 
 .day-heading small {
   color: #64748b;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-  line-height: 17px;
+  line-height: 18px;
   margin: 0;
 }
 
@@ -507,7 +520,7 @@ h1 {
 }
 
 .body-grid {
-  grid-auto-rows: 28px;
+  grid-auto-rows: 30px;
 }
 
 .time-label {
@@ -537,19 +550,19 @@ h1 {
   position: absolute;
   right: 16px;
   color: #64748b;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 800;
-  line-height: 19px;
+  line-height: 20px;
   letter-spacing: 0;
   white-space: nowrap;
-  transform: translateY(-9.5px);
+  transform: translateY(-10px);
 }
 
 .slot {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 28px;
+  min-height: 30px;
   place-items: center;
   border: 1px solid #e6edf5;
   border-top: 0;
@@ -608,9 +621,9 @@ h1 {
   border-radius: 0;
   color: #ca1616;
   background: transparent;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 12px;
+  line-height: 15px;
   letter-spacing: 0;
   white-space: nowrap;
 }
@@ -630,9 +643,9 @@ h1 {
   overflow: hidden;
   justify-content: flex-end;
   color: #9a3412;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 13px;
+  line-height: 16px;
   text-align: right;
   white-space: nowrap;
 }
@@ -658,9 +671,9 @@ h1 {
 .adjustment-time {
   display: block;
   color: #9a3412;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 12px;
+  line-height: 15px;
   text-align: right;
   white-space: nowrap;
 }
@@ -938,9 +951,9 @@ h1 {
 
 .result-choice span {
   color: #172033;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 500;
-  line-height: 22px;
+  line-height: 24px;
 }
 
 .result-choice small {
@@ -949,17 +962,17 @@ h1 {
   gap: 6px;
   margin-top: 4px;
   color: #64748b;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 16px;
+  line-height: 17px;
 }
 
 .result-adjusting-tag {
   color: #f97316;
-  font-size: 12px;
+  font-size: 13px;
   font-style: normal;
   font-weight: 700;
-  line-height: 16px;
+  line-height: 17px;
 }
 
 .result-choice:disabled {
@@ -1246,7 +1259,8 @@ h1 {
 .tooltip > strong {
   display: block;
   margin-bottom: 10px;
-  font-size: 15px;
+  font-size: 14px;
+  line-height: 18px;
 }
 
 .tooltip ul {
@@ -1262,7 +1276,7 @@ h1 {
   grid-template-columns: 14px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 800;
 }
 
@@ -1296,7 +1310,7 @@ h1 {
   display: grid;
   gap: 2px;
   color: #64748b;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 18px;
   word-break: keep-all;
@@ -1318,10 +1332,10 @@ h1 {
 .tooltip-members i {
   flex: 0 0 auto;
   color: #3182f6;
-  font-size: 12px;
+  font-size: 14px;
   font-style: normal;
   font-weight: 800;
-  line-height: 15px;
+  line-height: 18px;
 }
 
 .modal-backdrop {
@@ -1417,9 +1431,9 @@ h1 {
 
 .share-summary dt {
   color: #64748b;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  line-height: 16px;
+  line-height: 17px;
   text-align: center;
 }
 
